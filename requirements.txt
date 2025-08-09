@@ -1,6 +1,7 @@
-streamlit
-pandas
-numpy
-scikit-learn
-xgboost
-joblib
+streamlit==1.37.1
+streamlit-option-menu==0.3.12
+pandas==2.2.2
+numpy==1.26.4
+scikit-learn==1.5.1
+xgboost==2.1.1
+joblib==1.4.2
