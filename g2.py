@@ -1,127 +1,133 @@
-import streamlit as st
+import streamlit as st 
 import pandas as pd
 import numpy as np
 import joblib
-from pathlib import Path
+from streamlit_option_menu import option_menu
 
-st.set_page_config(page_title="Disaster Impact – XGBoost Predictor", layout="wide")
+# ------------------------------------------------
+# PAGE CONFIGURATION
+# ------------------------------------------------
+st.set_page_config(page_title="Disaster Impact Predictor - Group 2", layout="wide")
 
-# -----------------------------
-# 1) Load artifacts
-# -----------------------------
-@st.cache_resource
-def load_artifacts():
-    model = joblib.load("xgb_model.pkl")                 # Pipeline(imputer + xgb)
-    features = joblib.load("model_features_xgb.pkl")     # ordered list of features
-    y_info = joblib.load("y_transform_xgb.pkl")          # {"transform":"log1p","inverse":"expm1"}
-    return model, list(features), y_info
+# ------------------------------------------------
+# LOAD TRAINED ARTIFACTS (XGBoost + features)
+# ------------------------------------------------
+# Expect these files in the same folder as app.py
+MODEL_PATH = "xgb_disaster_model.pkl"      # trained on log1p(target)
+FEATS_PATH = "model_features.pkl"          # list of feature names (strings)
 
-model, MODEL_FEATURES, Y_INFO = load_artifacts()
+model = joblib.load(MODEL_PATH)
+X_columns = joblib.load(FEATS_PATH)
 
-# -----------------------------
-# 2) Helpers
-# -----------------------------
-def sanitize_to_model_X(df_in: pd.DataFrame) -> pd.DataFrame:
-    """Align uploaded dataframe to model's expected features and convert to numeric."""
-    df = df_in.copy()
-    df.columns = df.columns.str.strip()  # remove whitespace in headers
-
-    # Add missing expected columns with 0
-    for col in MODEL_FEATURES:
-        if col not in df.columns:
-            df[col] = 0
-
-    # Keep only expected columns, in correct order
-    X = df[MODEL_FEATURES].copy()
-
-    # Convert to numeric, forcing invalid values to NaN (imputer will handle)
-    for col in X.columns:
-        X[col] = pd.to_numeric(X[col], errors="coerce")
-
-    # Diagnostics for the user
-    extra_cols = [c for c in df_in.columns if c not in MODEL_FEATURES]
-    if extra_cols:
-        st.info(f"Ignoring unexpected columns: {extra_cols[:15]}{' ...' if len(extra_cols) > 15 else ''}")
-    if X.isna().any().any():
-        st.warning("Some non-numeric or blank values were replaced with NaN and will be imputed by the model.")
-
-    return X
-
-def inverse_transform(yhat_log: np.ndarray) -> np.ndarray:
-    if (Y_INFO or {}).get("inverse") == "expm1":
-        return np.expm1(yhat_log)
-    return yhat_log
-
-def predict_df(df_in: pd.DataFrame) -> pd.Series:
-    X = sanitize_to_model_X(df_in)
-    yhat_log = model.predict(X)
-    yhat = inverse_transform(yhat_log)
-    return pd.Series(yhat, index=X.index, name="Predicted_Total_Affected")
-
-# -----------------------------
-# 3) UI
-# -----------------------------
-st.title("🌍 Disaster Impact Predictor (XGBoost)")
-
-mode = st.radio("Choose input mode:", ["Upload CSV (batch)", "Enter a single record"], horizontal=True)
-
-with st.expander("Model details", expanded=False):
-    st.write(f"- Features expected: {len(MODEL_FEATURES)}")
-    st.code(", ".join(MODEL_FEATURES[:30]) + ("..." if len(MODEL_FEATURES) > 30 else ""))
-    st.write("Target transform:", Y_INFO)
-    # Template download button
-    template_df = pd.DataFrame(columns=MODEL_FEATURES)
-    st.download_button(
-        label="Download CSV Template",
-        data=template_df.to_csv(index=False).encode("utf-8"),
-        file_name="disaster_prediction_template.csv",
-        mime="text/csv"
+# ------------------------------------------------
+# SIDEBAR NAVIGATION (same layout vibe as your sample)
+# ------------------------------------------------
+with st.sidebar:
+    st.markdown(
+        "<h3 style='margin-bottom: 10px; color: #92400e;'>📑 Navigation</h3>",
+        unsafe_allow_html=True
+    )
+    selected = option_menu(
+        menu_title=None,
+        options=["Home", "Predictor", "About"],
+        icons=["house", "bar-chart", "info-circle"],
+        default_index=1,
+        styles={
+            "container": {"padding": "0!important", "background-color": "#fef3c7"},
+            "icon": {"color": "#92400e", "font-size": "20px"},
+            "nav-link": {
+                "font-size": "16px",
+                "color": "#000000",
+                "--hover-color": "#fde68a"
+            },
+            "nav-link-selected": {
+                "background-color": "#fcd34d",
+                "color": "#000000"
+            },
+        }
     )
 
-# -----------------------------
-# 4) Modes
-# -----------------------------
-if mode == "Upload CSV (batch)":
-    st.subheader("Batch Prediction")
-    up = st.file_uploader("Upload a CSV containing the predictor columns", type=["csv"])
-    if up:
-        df = pd.read_csv(up)
-        st.write("Preview:", df.head())
-        try:
-            preds = predict_df(df)
-            out = df.copy()
-            out["Predicted_Total_Affected"] = preds
-            st.success("Done! Download your results below.")
-            st.download_button(
-                "Download predictions CSV",
-                data=out.to_csv(index=False).encode("utf-8"),
-                file_name="predictions.csv",
-                mime="text/csv",
-            )
-        except Exception as e:
-            st.error("Could not generate predictions. Please check your file format.")
-            st.write(str(e))
-    else:
-        st.info("Upload a CSV with the exact columns the model expects, or download the template above.")
+# ------------------------------------------------
+# HOME TAB
+# ------------------------------------------------
+if selected == "Home":
+    st.title("🏠 Welcome to the Disaster Impact Predictor - Group 2")
+    st.write(
+        "This tool estimates the number of people potentially affected by a disaster "
+        "using a tuned XGBoost model trained on historical records."
+    )
 
-else:
-    st.subheader("Single Prediction")
-    st.caption("Enter values for the model’s features (numbers only). Leave blank = 0.")
-    cols = st.columns(3)
-    inputs = {}
-    for i, feat in enumerate(MODEL_FEATURES):
-        with cols[i % 3]:
-            val = st.text_input(feat, value="")
-            try:
-                inputs[feat] = float(val) if val.strip() != "" else 0.0
-            except:
-                inputs[feat] = 0.0
+# ------------------------------------------------
+# PREDICTOR TAB
+# ------------------------------------------------
+elif selected == "Predictor":
+    st.title("📊 Disaster Impact Prediction")
+    st.write("Provide the details to estimate the *Total Affected*.")
 
-    if st.button("Predict"):
-        df_one = pd.DataFrame([inputs])
+    # If your training included categorical encodings, place your mappings here.
+    # Leave empty if your model used numeric-only features.
+    disaster_group_options = {"Biological": 0, "Climatological": 1, "Geophysical": 2, "Hydrological": 3, "Meteorological": 4, "Technological": 5}
+    disaster_type_options  = {"Flood": 0, "Earthquake": 1, "Storm": 2, "Epidemic": 3}
+    country_options        = {"Ghana": 0, "Nigeria": 1, "Kenya": 2, "South Africa": 3}
+    region_options         = {"Africa": 0, "Asia": 1, "Europe": 2, "Americas": 3}
+
+    # Build inputs dynamically from the saved feature list
+    vals = {}
+    for col in X_columns:
+        label = col.replace("_", " ").title()
+        low = col.lower()
+
+        if low == "year":
+            vals[col] = st.number_input(label, min_value=1900, max_value=2100, value=2023, step=1)
+
+        elif low == "disaster_group":
+            choice = st.selectbox(label, list(disaster_group_options.keys()))
+            vals[col] = disaster_group_options[choice]
+
+        elif low == "disaster_type":
+            choice = st.selectbox(label, list(disaster_type_options.keys()))
+            vals[col] = disaster_type_options[choice]
+
+        elif low == "country":
+            choice = st.selectbox(label, list(country_options.keys()))
+            vals[col] = country_options[choice]
+
+        elif low == "region":
+            choice = st.selectbox(label, list(region_options.keys()))
+            vals[col] = region_options[choice]
+
+        # Common numeric features from your PDF (edit as needed)
+        elif low in ["total_deaths", "number_injured", "number_affected", "number_homeless"]:
+            vals[col] = st.number_input(label, min_value=0.0, value=0.0, step=1.0)
+
+        else:
+            # Default numeric input for any other feature
+            vals[col] = st.number_input(label, value=0.0, step=1.0)
+
+    # Convert to DataFrame in the exact column order expected by the model
+    input_df = pd.DataFrame([vals], columns=X_columns).replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    # Predict
+    if st.button("Predict Affected People"):
         try:
-            pred = predict_df(df_one).iloc[0]
-            st.metric("Predicted Total Affected", f"{pred:,.0f}")
+            # Model was trained on log1p(target), so we inverse-transform with expm1
+            log_pred = model.predict(input_df.values)
+            pred = np.expm1(log_pred)  # back to original scale
+            st.success(f"📌 Estimated Number of People Affected: {float(pred[0]):,.0f}")
         except Exception as e:
-            st.error("Prediction failed.")
-            st.write(str(e))
+            st.error("🚫 Prediction failed.")
+            st.code(str(e))
+            st.write("Expected columns (training order):", X_columns)
+            st.write("Current input shape:", input_df.shape)
+
+# ------------------------------------------------
+# ABOUT TAB
+# ------------------------------------------------
+elif selected == "About":
+    st.title("ℹ About This App")
+    st.markdown("""
+*Model*: Tuned XGBoost Regressor trained on log1p(Total Affected) and numeric features.  
+*Artifacts*: xgb_disaster_model.pkl, model_features.pkl (saved with joblib).  
+*Prediction*: We apply expm1 on the model output to return to the original scale.  
+*Purpose*: Support preparedness and resource planning with quick, consistent estimates.
+""")
